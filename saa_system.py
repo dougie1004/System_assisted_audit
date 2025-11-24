@@ -146,25 +146,45 @@ def check_approval_violation(df: pd.DataFrame, limit: int) -> pd.DataFrame:
     
     return violations[['거래일자', '계정코드', '거래처명', '거래금액', '결재상태']]
 
+# ******************************************************************************
+# **** [수정된 부분]: 계약서 컴플라이언스 분석 (LLM Mock) ****
+# ******************************************************************************
 def mock_llm_analyze_contract(contract_text: str, law_list: list) -> dict:
     """
     규정 준수 리스크: LLM을 이용한 계약서 핵심 조항 검토 (가상 함수)
+    특정 키워드(예: 90일, 손해배상)를 감지하여 리스크를 판단합니다.
     """
     st.info("🤖 LLM API를 호출하여 계약서 핵심 조항 분석 중... (가상 실행)")
     
-    if "하도급" in contract_text:
+    # 시나리오 1: 하도급 대금 지급 기일 초과 (법정 기한 60일) 및 손해배상 청구 불가 조항
+    if "대금은 90일 이내에 지급" in contract_text:
         return {
             "is_compliant": False,
-            "score": 65, # 낮은 점수
-            "findings": ["하도급 대금 지급 기일에 대한 명확한 명시가 부족합니다.", "기술 자료 보호 조항이 일반적인 수준에 그쳐 회사에 불리할 수 있습니다."],
-            "summary": "하도급법 관련 필수 조항 누락 및 법적 리스크 존재 가능성이 탐지됨."
+            "score": 55, # 낮은 점수
+            "findings": [
+                "하도급 대금 지급 기일(90일)이 법정 기한(60일)을 초과하여 하도급법 위반 소지가 있습니다.",
+                "기술 자료 보호 의무만 명시하고 기술 유용에 대한 손해배상 청구가 불가한 불리한 조항이 포함되어 있습니다."
+            ],
+            "summary": "하도급법 관련 대금 지급 리스크 및 기술 보호에 관한 불리 조항이 탐지됨."
         }
+    # 시나리오 2: 법규 준수
+    elif "대금은 50일 이내에 지급" in contract_text:
+        return {
+            "is_compliant": True,
+            "score": 95,
+            "findings": [
+                "대금 지급 기일(50일)이 법정 기한 내에 있으며, 특이한 불리 조항은 발견되지 않았습니다.",
+                "기술 자료 보호 및 비밀 유지 조항이 충분히 명확하게 명시되어 있습니다."
+            ],
+            "summary": "계약서 컴플라이언스 위험도가 매우 낮습니다. 양호."
+        }
+    # 기본 (기타 계약)
     else:
         return {
             "is_compliant": True,
-            "score": 90,
-            "findings": ["특이 사항 없음. 일반적인 상거래 규정을 준수합니다."],
-            "summary": "계약서 컴플라이언스 위험도가 낮습니다."
+            "score": 80,
+            "findings": ["검토 대상 계약서가 하도급 계약이 아닌 일반 구매 계약으로 보이며, 주요 법규 위반 사항은 없습니다."],
+            "summary": "일반 계약 컴플라이언스 양호."
         }
 
 
@@ -178,6 +198,9 @@ def generate_report_summary(anomalies: pd.DataFrame, benford_anomaly: bool, p_va
     """
     st.subheader("📊 자동 보고서 초안 생성 결과 (LLM 기반)")
     
+    # 계약서 컴플라이언스 발견사항을 요약에 포함
+    contract_finding_summary = f"컴플라이언스 점수 {contract_result['score']}점. 주요 발견사항: {', '.join(contract_result['findings'])}." if not contract_result['is_compliant'] else f"컴플라이언스 점수 {contract_result['score']}점. 위험도 낮음."
+
     summary = f"""
     ## [SAA] 핵심 리스크 요약 보고 (1인 감사조직용)
 
@@ -187,7 +210,7 @@ def generate_report_summary(anomalies: pd.DataFrame, benford_anomaly: bool, p_va
     | **재무 리스크 (벤포드)** | {'🚨 위험' if benford_anomaly else '✅ 정상'} | 선행 숫자 분포 P-value: {p_value:.4f} ({'유의수준 이하로 조작 의심 패턴 탐지' if benford_anomaly else '정상 범위'}) |
     | **비용 급증 (Vendor Trend)** | {'🚨 위험' if not anomalies.empty else '✅ 정상'} | 전월 대비 {len(anomalies)}건의 거래에서 임계치({st.session_state.rules['vendor_trend_threshold']*100}%)를 초과하는 급증 패턴 탐지 |
     | **내부 규정 위반** | {'🚨 위험' if not rule_violations.empty else '✅ 정상'} | 총 {len(rule_violations)}건의 지출에서 1천만원 초과 건에 대한 결재/승인 규정 위반 의심 |
-    | **계약서 컴플라이언스** | {'🚨 위험' if not contract_result['is_compliant'] else '✅ 정상'} | 컴플라이언스 점수 {contract_result['score']}점. 주요 발견사항: {', '.join(contract_result['findings'][:1])}... |
+    | **계약서 컴플라이언스** | {'🚨 위험' if not contract_result['is_compliant'] else '✅ 정상'} | {contract_finding_summary} |
 
     ### 2. 감사 처분 요구서 초안 (권고 사항)
     1. **벤포드 리스크:** 선행 숫자 9의 과도한 집중 현상에 대해 해당 계정(매출 또는 비용)의 **원본 증빙 자료**를 검토하고 **재무 기록의 무결성**을 확보할 것을 권고함.
@@ -242,6 +265,29 @@ def saa_main():
         st.cache_data.clear()
         st.success("새로운 규칙이 적용되었습니다. 감사를 재실행합니다.")
         
+    st.sidebar.markdown("---")
+    st.sidebar.header("📝 계약서 분석 시뮬레이션")
+    
+    # 계약서 분석을 위한 입력 필드 추가
+    contract_scenario = st.sidebar.selectbox(
+        '분석할 계약서 시나리오 선택',
+        [
+            '1. 하도급법 위반 소지 계약서 (90일 지급)',
+            '2. 법규 준수 계약서 (50일 지급)',
+            '3. 일반 계약서 (하도급 키워드 없음)'
+        ]
+    )
+
+    # 선택된 시나리오에 따라 계약서 텍스트 설정
+    if contract_scenario == '1. 하도급법 위반 소지 계약서 (90일 지급)':
+        mock_contract_text = "이 계약은 A사와 B사의 하도급 거래에 관한 것이며, 대금은 납품일로부터 90일 이내에 지급한다. 기술 자료 보호 의무만 명시하고 손해배상 청구는 불가하다."
+    elif contract_scenario == '2. 법규 준수 계약서 (50일 지급)':
+        mock_contract_text = "이 계약은 A사와 B사의 하도급 거래에 관한 것이며, 대금은 납품일로부터 50일 이내에 지급한다. 기술 유용 시 징벌적 손해배상을 청구할 수 있다."
+    else:
+        mock_contract_text = "이 계약은 C사와 D사의 일반적인 제품 구매에 관한 것이며, 대금은 익월 말에 지급한다. 하도급 키워드는 포함되어 있지 않다."
+        
+    st.sidebar.text_area("계약서 텍스트", value=mock_contract_text, height=150)
+
 
     # 메인 영역
     if st.button("🚀 SAA 감사 실행"):
@@ -307,10 +353,9 @@ def saa_main():
         # 2-4. 규정 준수 리스크: 계약서 컴플라이언스 (LLM Mock)
         st.subheader("2-4. LLM 기반 계약서 컴플라이언스 분석")
         
-        # 모의 계약서 데이터 
-        mock_contract_text = "이 계약은 A사와 B사의 하도급 거래에 관한 것이며, 대금은 90일 이내에 지급한다. 기술 자료 보호에 대한 조항은 일반적인 수준을 따른다."
         law_list = ["하도급법", "공정거래법"]
         
+        # 사이드바에서 선택된 mock_contract_text를 함수에 전달
         contract_result = mock_llm_analyze_contract(mock_contract_text, law_list)
         
         if not contract_result['is_compliant']:
